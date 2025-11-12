@@ -1,55 +1,53 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs';
+import { join } from 'path';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const deploymentsPath = join(process.cwd(), '..', 'deployments');
+const abiOutputPath = join(process.cwd(), 'src', 'abi');
 
-const CONTRACT_NAME = 'SatisfactionSurvey';
-const DEPLOYMENTS_DIR = path.resolve(__dirname, '../../deployments');
-const OUTPUT_DIR = path.resolve(__dirname, '../src/abi');
-
-// Ensure output directory exists
-if (!fs.existsSync(OUTPUT_DIR)) {
-  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+if (!existsSync(abiOutputPath)) {
+  mkdirSync(abiOutputPath, { recursive: true });
 }
 
-// Read ABI from compiled artifacts
-const artifactPath = path.resolve(__dirname, `../../artifacts/contracts/${CONTRACT_NAME}.sol/${CONTRACT_NAME}.json`);
-let abi = [];
+const abiFileContent = {
+  abi: []
+};
+const addressesFileContent = {};
 
-if (fs.existsSync(artifactPath)) {
-  const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
-  abi = artifact.abi;
+try {
+  if (existsSync(deploymentsPath)) {
+    const chainDirs = readdirSync(deploymentsPath);
+    for (const chainId of chainDirs) {
+      const chainDeploymentPath = join(deploymentsPath, chainId);
+      if (statSync(chainDeploymentPath).isDirectory()) {
+        const files = readdirSync(chainDeploymentPath);
+        for (const file of files) {
+          if (file.endsWith('.json') && !file.includes('.dbg.')) {
+            const filePath = join(chainDeploymentPath, file);
+            const deployment = JSON.parse(readFileSync(filePath, 'utf8'));
+            if (file === 'SatisfactionSurvey.json') {
+              abiFileContent.abi = deployment.abi;
+              addressesFileContent[chainId] = {
+                address: deployment.address,
+                chainId: parseInt(chainId),
+                chainName: chainId === '31337' ? 'hardhat' : chainId === '11155111' ? 'sepolia' : 'unknown'
+              };
+            }
+          }
+        }
+      }
+    }
+  }
+} catch (error) {
+  console.warn("No deployments found or error reading deployments:", error.message);
 }
 
 // Write ABI file
-const abiContent = `export const ${CONTRACT_NAME}ABI = ${JSON.stringify({ abi }, null, 2)} as const;\n`;
-fs.writeFileSync(path.join(OUTPUT_DIR, `${CONTRACT_NAME}ABI.ts`), abiContent);
+const abiContent = `export const SatisfactionSurveyABI = ${JSON.stringify(abiFileContent, null, 2)} as const;`;
+writeFileSync(join(abiOutputPath, 'SatisfactionSurveyABI.ts'), abiContent);
 
-// Read deployment addresses
-const addresses = {
-  '31337': { address: '0x0000000000000000000000000000000000000000', chainId: 31337, chainName: 'hardhat' },
-  '11155111': { address: '0x0000000000000000000000000000000000000000', chainId: 11155111, chainName: 'sepolia' }
-};
+// Write Addresses file
+const addressesContent = `export const SatisfactionSurveyAddresses: Record<string, { address: \`0x\${string}\`, chainId: number, chainName: string }> = ${JSON.stringify(addressesFileContent, null, 2)};`;
+writeFileSync(join(abiOutputPath, 'SatisfactionSurveyAddresses.ts'), addressesContent);
 
-// Update from deployments if available
-['hardhat', 'localhost', 'sepolia'].forEach(network => {
-  const deploymentFile = path.join(DEPLOYMENTS_DIR, network, `${CONTRACT_NAME}.json`);
-  if (fs.existsSync(deploymentFile)) {
-    const deployment = JSON.parse(fs.readFileSync(deploymentFile, 'utf8'));
-    const chainId = network === 'sepolia' ? '11155111' : '31337';
-    addresses[chainId] = {
-      address: deployment.address,
-      chainId: parseInt(chainId),
-      chainName: network === 'sepolia' ? 'sepolia' : 'hardhat'
-    };
-  }
-});
-
-// Write addresses file
-const addressesContent = `export const ${CONTRACT_NAME}Addresses: Record<string, { address: \`0x\${string}\`, chainId: number, chainName: string }> = ${JSON.stringify(addresses, null, 2)};\n`;
-fs.writeFileSync(path.join(OUTPUT_DIR, `${CONTRACT_NAME}Addresses.ts`), addressesContent);
-
-console.log(`Generated ABI and Addresses for ${CONTRACT_NAME}.`);
-
+console.log("✅ Generated ABI and Addresses for SatisfactionSurvey.");
+console.log("   Chains found:", Object.keys(addressesFileContent).join(', ') || 'none');

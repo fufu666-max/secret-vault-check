@@ -1,73 +1,111 @@
-# Welcome to your Lovable project
+# Employee Satisfaction Survey DApp
 
-## Project info
+> An anonymous employee satisfaction survey platform powered by Fully Homomorphic Encryption (FHE) on Ethereum, ensuring complete privacy of individual responses while enabling transparent aggregate statistics.
 
-**URL**: https://lovable.dev/projects/cf125266-141f-4ca2-9bc8-f243eb200eb4
+## ✨ Features
 
-## How can I edit this code?
+- 🔐 **End-to-End Encryption**: Individual survey responses are encrypted using FHE
+- 📊 **Encrypted Aggregation**: Smart contract computes totals and counts in encrypted state
+- 🔓 **Selective Decryption**: Only aggregate statistics are decrypted for display
+- 🏢 **Department-Based Analytics**: Track satisfaction across Marketing, Sales, Engineering, HR, and Finance
 
-There are several ways of editing your application.
+## 🚀 Quick Start
 
-**Use Lovable**
+### Prerequisites
+- Node.js >= 20.x
+- npm >= 9.x
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/cf125266-141f-4ca2-9bc8-f243eb200eb4) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+### 1. Install Dependencies
+```bash
+npm install
 ```
 
-**Edit a file directly in GitHub**
+### 2. Configure Environment
+```bash
+npx hardhat vars set MNEMONIC
+npx hardhat vars set INFURA_API_KEY
+npx hardhat vars set PRIVATE_KEY  # Optional, for Sepolia
+```
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### 3. Compile Contracts
+```bash
+npm run compile
+```
 
-**Use GitHub Codespaces**
+### 4. Run Tests
+```bash
+npm run test
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+### 5. Start Local Network
+**Terminal A:**
+```bash
+npx hardhat node
+```
 
-## What technologies are used for this project?
+**Terminal B:**
+```bash
+npm run deploy:local
+```
 
-This project is built with:
+## 📋 CLI Commands
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+### Submit Survey Response
+```bash
+npx hardhat --network localhost survey:submit --value 8 --dept 0
+```
 
-## How can I deploy this project?
+### View Global Aggregates
+```bash
+npx hardhat --network localhost survey:get-global
+```
 
-Simply open [Lovable](https://lovable.dev/projects/cf125266-141f-4ca2-9bc8-f243eb200eb4) and click on Share -> Publish.
+### View Department Aggregates
+```bash
+npx hardhat --network localhost survey:get-dept --dept 0
+```
 
-## Can I connect a custom domain to my Lovable project?
+### Department IDs
+- `0`: Marketing
+- `1`: Sales
+- `2`: Engineering
+- `3`: HR
+- `4`: Finance
 
-Yes, you can!
+## 🌐 Deploy to Sepolia
+```bash
+npm run deploy:sepolia
+npx hardhat --network sepolia survey:submit --value 7 --dept 1
+npx hardhat --network sepolia survey:get-global
+```
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+## 📦 Smart Contract
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+### SatisfactionSurvey.sol
+
+**Key Functions:**
+- `submitResponse()`: Submit encrypted rating
+- `getGlobalAggregates()`: Get encrypted global totals
+- `getDepartmentAggregates()`: Get encrypted department totals
+- `allowUserToDecrypt()`: Grant decryption permission
+
+## 🔐 Privacy Guarantees
+
+### Encrypted
+- ✅ Individual employee ratings
+- ✅ Individual department selections
+- ✅ All computation states
+
+### Decrypted
+- ✅ Global aggregate statistics
+- ✅ Per-department aggregates
+- ✅ Computed averages
+
+### Never Revealed
+- ❌ Individual ratings
+- ❌ Employee identities
+- ❌ Submission linkage
+
+## 📄 License
+
+BSD-3-Clause-Clear

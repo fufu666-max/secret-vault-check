@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState, useRef } from "react";
-import { useAccount, useChainId, useReadContract, useWriteContract, useSignTypedData } from "wagmi";
+import { useAccount, useChainId, useWriteContract } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { isHex, toHex, bytesToHex, padHex } from "viem";
-import { useFhevmMock } from "../hooks/useFhevmMock";
+import { useFhevm } from "../hooks/useFhevm";
 import { SatisfactionSurveyABI } from "../abi/SatisfactionSurveyABI";
 import { SatisfactionSurveyAddresses } from "../abi/SatisfactionSurveyAddresses";
 
@@ -29,138 +28,223 @@ function SurveyMVP() {
   const [dept, setDept] = useState<number>(0);
   const [rating, setRating] = useState<string>("5");
 
-  const { data: globalAgg } = useReadContract({
-    abi: SatisfactionSurveyABI.abi,
-    address: deployed ? contractAddress : undefined,
-    functionName: "getGlobalAggregates",
-    chainId: effectiveChainId,
-    query: { enabled: Boolean(deployed && contractAddress) }
-  });
-
-  const { data: deptAgg } = useReadContract({
-    abi: SatisfactionSurveyABI.abi,
-    address: deployed ? contractAddress : undefined,
-    functionName: "getDepartmentAggregates",
-    args: [BigInt(dept)],
-    chainId: effectiveChainId,
-    query: { enabled: Boolean(deployed && contractAddress) }
-  });
-
   const write = useWriteContract();
-  const signTyped = useSignTypedData();
-  const fhe = useFhevmMock({ chainId });
+  const fhe = useFhevm(chainId);
 
+  // 状态：存储解密后的聚合数据
   const [globalTotal, setGlobalTotal] = useState<bigint>(0n);
   const [globalCount, setGlobalCount] = useState<bigint>(0n);
   const [deptTotal, setDeptTotal] = useState<bigint>(0n);
   const [deptCount, setDeptCount] = useState<bigint>(0n);
-  const [cachedSignature, setCachedSignature] = useState<`0x${string}` | null>(null);
-  const [cachedTimestamp, setCachedTimestamp] = useState<{ start: number; duration: number } | null>(null);
   const isDecryptingRef = useRef(false);
 
-  // Decrypt aggregates
+  // Decrypt aggregates - 从合约读取并解密真实数据
   useEffect(() => {
     const run = async () => {
-      if (!deployed || !contractAddress || !fhe.instance || !address) return;
+      if (!deployed || !contractAddress || !fhe.isReady || !address) return;
       if (isDecryptingRef.current) return;
-      
-      const handles: string[] = [];
-      if (globalAgg && Array.isArray(globalAgg)) {
-        const [t, c] = globalAgg as unknown as [`0x${string}`, `0x${string}`];
-        if (t !== "0x0000000000000000000000000000000000000000000000000000000000000000") handles.push(t);
-        if (c !== "0x0000000000000000000000000000000000000000000000000000000000000000") handles.push(c);
-      }
-      if (deptAgg && Array.isArray(deptAgg)) {
-        const [t, c] = deptAgg as unknown as [`0x${string}`, `0x${string}`];
-        if (t !== "0x0000000000000000000000000000000000000000000000000000000000000000") handles.push(t);
-        if (c !== "0x0000000000000000000000000000000000000000000000000000000000000000") handles.push(c);
-      }
-      if (handles.length === 0) {
-        setGlobalTotal(0n); setGlobalCount(0n); setDeptTotal(0n); setDeptCount(0n);
-        return;
-      }
 
       isDecryptingRef.current = true;
       try {
-        let signature = cachedSignature;
-        let timestamp = cachedTimestamp;
+        console.log("[Decrypt] 🔍 Reading handles from contract using ethers...");
         
-        if (!signature || !timestamp) {
-          const { eip712, startTimestamp, durationDays } = fhe.buildTypedData(contractAddress);
-          signature = await signTyped.signTypedDataAsync({
-            domain: eip712.domain as any,
-            types: { UserDecryptRequestVerification: eip712.types.UserDecryptRequestVerification as any },
-            primaryType: "UserDecryptRequestVerification",
-            message: eip712.message as any,
-          }) as `0x${string}`;
-          timestamp = { start: startTimestamp, duration: durationDays };
-          setCachedSignature(signature);
-          setCachedTimestamp(timestamp);
+        // Use ethers Contract to read handles directly (like Linkedin project)
+        const { ethers } = await import("ethers");
+        const provider = new ethers.BrowserProvider((window as any).ethereum);
+        const contract = new ethers.Contract(
+          contractAddress as string,
+          SatisfactionSurveyABI.abi,
+          provider
+        );
+        
+        // Read global aggregates
+        const globalAggResult = await contract.getGlobalAggregates();
+        const globalTotalHandle = String(globalAggResult[0]);
+        const globalCountHandle = String(globalAggResult[1]);
+        
+        // Read department aggregates
+        const deptAggResult = await contract.getDepartmentAggregates(BigInt(dept));
+        const deptTotalHandle = String(deptAggResult[0]);
+        const deptCountHandle = String(deptAggResult[1]);
+        
+        console.log("[Decrypt] Handles from contract (raw):", {
+          globalTotal: { value: globalTotalHandle, type: typeof globalTotalHandle, length: globalTotalHandle?.length },
+          globalCount: { value: globalCountHandle, type: typeof globalCountHandle, length: globalCountHandle?.length },
+          deptTotal: { value: deptTotalHandle, type: typeof deptTotalHandle, length: deptTotalHandle?.length },
+          deptCount: { value: deptCountHandle, type: typeof deptCountHandle, length: deptCountHandle?.length },
+        });
+        
+        // Helper function to validate handle
+        const isValidHandle = (handle: string): boolean => {
+          return !!(handle && 
+                 handle !== "0x" && 
+                 handle.length >= 66 &&
+                 handle !== "0x0000000000000000000000000000000000000000000000000000000000000000" &&
+                 /^0x[0-9a-fA-F]{64}$/.test(handle));
+        };
+        
+        // Collect all valid handles with type mapping
+        const handleMap: Record<string, string[]> = {};
+        
+        if (isValidHandle(globalTotalHandle)) {
+          if (!handleMap[globalTotalHandle]) handleMap[globalTotalHandle] = [];
+          handleMap[globalTotalHandle].push('globalTotal');
+        } else {
+          console.warn("[Decrypt] Invalid globalTotal handle:", globalTotalHandle);
         }
         
-        const res = await fhe.decryptHandles(
-          contractAddress, 
-          address as `0x${string}`, 
-          signature, 
-          handles,
-          timestamp.start,
-          timestamp.duration
+        if (isValidHandle(globalCountHandle)) {
+          if (!handleMap[globalCountHandle]) handleMap[globalCountHandle] = [];
+          handleMap[globalCountHandle].push('globalCount');
+        } else {
+          console.warn("[Decrypt] Invalid globalCount handle:", globalCountHandle);
+        }
+        
+        if (isValidHandle(deptTotalHandle)) {
+          if (!handleMap[deptTotalHandle]) handleMap[deptTotalHandle] = [];
+          handleMap[deptTotalHandle].push('deptTotal');
+        } else {
+          console.warn("[Decrypt] Invalid deptTotal handle:", deptTotalHandle);
+        }
+        
+        if (isValidHandle(deptCountHandle)) {
+          if (!handleMap[deptCountHandle]) handleMap[deptCountHandle] = [];
+          handleMap[deptCountHandle].push('deptCount');
+        } else {
+          console.warn("[Decrypt] Invalid deptCount handle:", deptCountHandle);
+        }
+        
+        const uniqueHandles = Object.keys(handleMap);
+        
+        if (uniqueHandles.length === 0) {
+          console.error("❌ ===== 解密失败诊断 ===== ❌");
+          console.error("问题：从合约读取的所有 handle 都无效");
+          console.error("Handle 详情：");
+          console.error("  - Global Total:", globalTotalHandle);
+          console.error("  - Global Count:", globalCountHandle);
+          console.error("  - Dept Total:", deptTotalHandle);
+          console.error("  - Dept Count:", deptCountHandle);
+          console.error("");
+          console.error("❗ 如果 handle 是 '0x' 或长度不足 66 字符，说明：");
+          console.error("  1. 合约还没有重新部署（需要运行新的部署脚本）");
+          console.error("  2. 或者合约已部署但还没有提交任何调查");
+          console.error("");
+          console.error("✅ 解决方案：");
+          console.error("  1. 停止 Hardhat 节点 (Ctrl+C)");
+          console.error("  2. 重新启动: npx hardhat node");
+          console.error("  3. 重新部署: npx hardhat run scripts/deploy.ts --network localhost");
+          console.error("  4. 刷新浏览器页面");
+          console.error("============================");
+          
+          setGlobalTotal(0n);
+          setGlobalCount(0n);
+          setDeptTotal(0n);
+          setDeptCount(0n);
+          return;
+        }
+        
+        console.log("[Decrypt] ✨ Batch decrypting", uniqueHandles.length, "unique handles with ONE signature...");
+        
+        // BATCH decrypt - only ONE signature needed!
+        const results = await fhe.decryptMultiple(
+          uniqueHandles.map(h => ({ handle: h, contractAddress: contractAddress as string })),
+          address as string
         );
-        const gt = (globalAgg?.[0] as string) ? BigInt(res[globalAgg?.[0] as string] ?? 0) : 0n;
-        const gc = (globalAgg?.[1] as string) ? BigInt(res[globalAgg?.[1] as string] ?? 0) : 0n;
-        const dt = (deptAgg?.[0] as string) ? BigInt(res[deptAgg?.[0] as string] ?? 0) : 0n;
-        const dc = (deptAgg?.[1] as string) ? BigInt(res[deptAgg?.[1] as string] ?? 0) : 0n;
-        setGlobalTotal(gt); setGlobalCount(gc); setDeptTotal(dt); setDeptCount(dc);
+        
+        console.log("[Decrypt] ✅ Batch decryption complete!", results);
+        
+        // Apply results using mapping
+        for (const [handle, types] of Object.entries(handleMap)) {
+          const value = results[handle];
+          if (value !== undefined) {
+            for (const type of types) {
+              const bigValue = BigInt(value);
+              switch (type) {
+                case 'globalTotal':
+                  setGlobalTotal(bigValue);
+                  console.log("[Decrypt] ✅ Global total:", value);
+                  break;
+                case 'globalCount':
+                  setGlobalCount(bigValue);
+                  console.log("[Decrypt] ✅ Global count:", value);
+                  break;
+                case 'deptTotal':
+                  setDeptTotal(bigValue);
+                  console.log("[Decrypt] ✅ Department total:", value);
+                  break;
+                case 'deptCount':
+                  setDeptCount(bigValue);
+                  console.log("[Decrypt] ✅ Department count:", value);
+                  break;
+              }
+            }
+          }
+        }
+        
+        console.log("[Decrypt] 🎉 All values displayed successfully!");
+      } catch (error) {
+        console.error("[Decrypt] ❌ Decryption error:", error);
+        setGlobalTotal(0n);
+        setGlobalCount(0n);
+        setDeptTotal(0n);
+        setDeptCount(0n);
       } finally {
         isDecryptingRef.current = false;
       }
     };
     run();
-  }, [globalAgg, deptAgg, deployed, contractAddress, fhe.instance, address, cachedSignature, cachedTimestamp]);
+  }, [deployed, contractAddress, fhe.isReady, address, chainId, fhe.decryptMultiple, dept]);
 
   const canSubmit = useMemo(() => {
     const ratingNum = Number.parseInt(rating);
     const ratingOk = Number.isInteger(ratingNum) && ratingNum >= 1 && ratingNum <= 10;
-    return deployed && address && chainId === 31337 && fhe.instance && ratingOk && dept >= 0;
-  }, [deployed, address, chainId, fhe.instance, rating, dept]);
+    const chainOk = chainId === 31337 || chainId === 11155111;
+    const result = deployed && address && chainOk && fhe.isReady && ratingOk && dept >= 0;
+    
+    // Debug logging
+    if (!result) {
+      console.log("[Submit] Button disabled:", {
+        deployed,
+        hasAddress: !!address,
+        chainId,
+        chainOk,
+        fheIsReady: fhe.isReady,
+        fheLoading: fhe.loading,
+        fheError: fhe.error?.message,
+        ratingOk,
+        dept,
+      });
+    }
+    
+    return result;
+  }, [deployed, address, chainId, fhe.isReady, fhe.loading, fhe.error, rating, dept]);
 
   const onSubmit = async () => {
     try {
       const ratingNum = Number.parseInt(rating);
       if (!canSubmit || !contractAddress || !address) return;
 
-      const enc = await fhe.encryptInputs(contractAddress as `0x${string}`, address as `0x${string}`, ratingNum);
+      console.log("[Submit] Starting encryption...");
+      const encrypted = await fhe.encrypt(contractAddress as `0x${string}`, address as `0x${string}`, ratingNum);
 
-      const toHexAny = (v: unknown): `0x${string}` => {
-        if (typeof v === "string") {
-          return (isHex(v as string) ? (v as `0x${string}`) : (toHex(v as string) as `0x${string}`));
-        }
-        if (v instanceof Uint8Array) return bytesToHex(v) as `0x${string}`;
-        if (v instanceof ArrayBuffer) return bytesToHex(new Uint8Array(v as ArrayBuffer)) as `0x${string}`;
-        if (typeof v === "bigint" || typeof v === "number") return toHex(v as number) as `0x${string}`;
-        return toHex(JSON.stringify(v)) as `0x${string}`;
-      };
-
-      const handleScoreHex = padHex(toHexAny(enc.handles[0]), { size: 32 });
-      const handleOneHex = padHex(toHexAny(enc.handles[1]), { size: 32 });
-      const inputProofHex = toHexAny(enc.inputProof);
+      console.log("[Submit] Encryption complete, submitting transaction...");
+      const handleScore = encrypted.handles[0] as `0x${string}`;
+      const handleOne = encrypted.handles[1] as `0x${string}`;
+      const inputProof = encrypted.inputProof as `0x${string}`;
 
       await write.writeContractAsync({
         abi: SatisfactionSurveyABI.abi,
         address: contractAddress as `0x${string}`,
         functionName: "submitResponse",
-        args: [handleScoreHex, inputProofHex, BigInt(dept), handleOneHex, inputProofHex],
+        args: [handleScore, inputProof, BigInt(dept), handleOne, inputProof],
       });
 
-      alert("Survey submitted successfully!");
+      console.log("[Submit] Submission successful!");
     } catch (e: any) {
-      console.error("Submit error:", e);
+      console.error("[Submit] Submission failed:", e);
       alert("Submit failed: " + (e?.message ?? String(e)));
     }
   };
-
-  const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID as string | undefined;
-  const hasProjectId = typeof projectId === 'string' && projectId.length > 0 && projectId !== 'WALLETCONNECT_PROJECT_ID_REQUIRED';
 
   return (
     <div className="min-h-screen bg-background">
@@ -168,13 +252,7 @@ function SurveyMVP() {
         <div className="container mx-auto px-4 py-6 flex justify-between items-center">
           <h1 className="text-2xl font-bold">Employee Satisfaction Survey</h1>
           <div className="flex items-center gap-2">
-            {hasProjectId ? (
-              <ConnectButton chainStatus="icon" label="连接钱包" showBalance={false} />
-            ) : (
-              <span className="text-xs text-muted-foreground px-3 py-1 border rounded-md">
-                Connect Wallet
-              </span>
-            )}
+            <ConnectButton chainStatus="icon" showBalance={false} />
           </div>
         </div>
       </header>
@@ -216,19 +294,36 @@ function SurveyMVP() {
                 />
               </div>
             </div>
-            <div className="flex justify-end">
+            <div className="flex justify-end flex-col items-end gap-2">
               <button 
                 onClick={onSubmit}
                 disabled={!canSubmit || fhe.loading}
-                className="bg-primary hover:bg-primary/90 text-primary-foreground px-8 py-2 rounded-md disabled:opacity-50"
+                className="bg-primary hover:bg-primary/90 text-primary-foreground px-8 py-2 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Submit
+                {fhe.loading ? "Initializing FHE..." : "Submit"}
               </button>
+              {!canSubmit && (
+                <div className="text-xs text-muted-foreground text-right space-y-1">
+                  {!address && <p>⚠️ Please connect your wallet</p>}
+                  {address && chainId && chainId !== 31337 && chainId !== 11155111 && (
+                    <p>⚠️ Please switch to local Hardhat network (31337) or Sepolia (11155111)</p>
+                  )}
+                  {address && (chainId === 31337 || chainId === 11155111) && fhe.loading && (
+                    <p>⏳ Initializing FHEVM...</p>
+                  )}
+                  {address && (chainId === 31337 || chainId === 11155111) && !fhe.isReady && !fhe.loading && fhe.error && (
+                    <p className="text-sm text-muted-foreground">⚠️ {chainId === 11155111 ? 'FHEVM not available on Sepolia' : 'FHEVM initialization failed'}</p>
+                  )}
+                  {address && (chainId === 31337 || chainId === 11155111) && fhe.isReady && !deployed && (
+                    <p>⚠️ Contract not deployed</p>
+                  )}
+                </div>
+              )}
             </div>
-            {chainId !== 31337 && (
-              <p className="text-xs text-muted-foreground">Note: Browser-side FHE encryption is enabled on local Hardhat network (31337).</p>
+            {address && chainId !== 31337 && chainId !== 11155111 && (
+              <p className="text-xs text-muted-foreground">Note: FHE encryption is supported on local Hardhat (31337) and Sepolia (11155111).</p>
             )}
-            {!deployed && (
+            {!deployed && address && (chainId === 31337 || chainId === 11155111) && (
               <p className="text-sm text-destructive">Contract not deployed for current chain. Please deploy SatisfactionSurvey and refresh.</p>
             )}
           </div>

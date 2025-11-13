@@ -19,10 +19,22 @@ contract SatisfactionSurvey is SepoliaConfig {
     /// @notice Department encrypted totals and counts
     mapping(uint256 => euint32) private _deptTotal;
     mapping(uint256 => euint32) private _deptCount;
+    
+    /// @notice Track which departments have been initialized
+    mapping(uint256 => bool) private _deptInitialized;
 
     /// @param manager Address authorized to decrypt aggregates
     constructor(address manager) {
         decryptManager = manager;
+        
+        // Initialize encrypted aggregates to encrypted zero
+        // This ensures getGlobalAggregates() always returns valid handles
+        _globalTotal = FHE.asEuint32(0);
+        _globalCount = FHE.asEuint32(0);
+        
+        // Allow contract to handle these values
+        FHE.allowThis(_globalTotal);
+        FHE.allowThis(_globalCount);
     }
 
     /// @notice Submit a response: encrypted score and encrypted constant one (for counting).
@@ -46,6 +58,16 @@ contract SatisfactionSurvey is SepoliaConfig {
         _globalTotal = FHE.add(_globalTotal, score);
         _globalCount = FHE.add(_globalCount, one);
 
+        // Initialize department aggregates to zero if not yet initialized
+        // This ensures getDepartmentAggregates() always returns valid handles
+        if (!_deptInitialized[deptId]) {
+            _deptTotal[deptId] = FHE.asEuint32(0);
+            _deptCount[deptId] = FHE.asEuint32(0);
+            FHE.allowThis(_deptTotal[deptId]);
+            FHE.allowThis(_deptCount[deptId]);
+            _deptInitialized[deptId] = true;
+        }
+        
         // Update department aggregates
         _deptTotal[deptId] = FHE.add(_deptTotal[deptId], score);
         _deptCount[deptId] = FHE.add(_deptCount[deptId], one);
@@ -86,6 +108,14 @@ contract SatisfactionSurvey is SepoliaConfig {
         FHE.allow(_globalTotal, user);
         FHE.allow(_globalCount, user);
         for (uint256 i = 0; i < deptIds.length; i++) {
+            // Initialize department if not yet initialized
+            if (!_deptInitialized[deptIds[i]]) {
+                _deptTotal[deptIds[i]] = FHE.asEuint32(0);
+                _deptCount[deptIds[i]] = FHE.asEuint32(0);
+                FHE.allowThis(_deptTotal[deptIds[i]]);
+                FHE.allowThis(_deptCount[deptIds[i]]);
+                _deptInitialized[deptIds[i]] = true;
+            }
             FHE.allow(_deptTotal[deptIds[i]], user);
             FHE.allow(_deptCount[deptIds[i]], user);
         }

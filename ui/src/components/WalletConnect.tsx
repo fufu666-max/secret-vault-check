@@ -7,10 +7,10 @@ const WalletConnect = () => {
   return (
     <div className="flex items-center gap-2">
       {hasProjectId ? (
-        <ConnectButton chainStatus="icon" label="连接钱包" showBalance={false} />
+        <ConnectButton chainStatus="icon" showBalance={false} />
       ) : (
         <span className="text-xs text-muted-foreground px-3 py-1 border rounded-md">
-          请设置 VITE_WALLETCONNECT_PROJECT_ID 以启用 RainbowKit
+          Please set VITE_WALLETCONNECT_PROJECT_ID to enable RainbowKit
         </span>
       )}
     </div>
@@ -18,4 +18,3 @@ const WalletConnect = () => {
 };
 
 export default WalletConnect;
-

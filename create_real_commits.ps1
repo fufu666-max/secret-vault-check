@@ -268,3 +268,4 @@ foreach ($commit in $commits) {
 Write-Host "`nAll commits created successfully!"
 Write-Host "Total commits: $(git rev-list --count HEAD)"
 
+

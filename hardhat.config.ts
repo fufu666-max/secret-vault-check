@@ -1,14 +1,16 @@
 import type { HardhatUserConfig } from "hardhat/config";
 import { vars } from "hardhat/config";
-import "@nomicfoundation/hardhat-toolbox";
+import "@fhevm/hardhat-plugin";
 import "@nomicfoundation/hardhat-ethers";
+import "@nomicfoundation/hardhat-verify";
 import "@typechain/hardhat";
 import "hardhat-deploy";
+import "hardhat-gas-reporter";
+import "solidity-coverage";
 import "./tasks/SatisfactionSurvey";
 
 const MNEMONIC: string = vars.get("MNEMONIC", "test test test test test test test test test test test junk");
 const INFURA_API_KEY: string = vars.get("INFURA_API_KEY", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz");
-const PRIVATE_KEY: string = vars.get("PRIVATE_KEY", "");
 
 const config: HardhatUserConfig = {
   defaultNetwork: "hardhat",
@@ -36,17 +38,26 @@ const config: HardhatUserConfig = {
       chainId: 31337,
       url: "http://localhost:8545",
     },
+    localhost: {
+      accounts: {
+        mnemonic: MNEMONIC,
+        path: "m/44'/60'/0'/0/",
+        count: 10,
+      },
+      chainId: 31337,
+      url: "http://localhost:8545",
+    },
     sepolia: {
-      accounts:
-        PRIVATE_KEY && PRIVATE_KEY.trim().length > 0
-          ? [PRIVATE_KEY.startsWith("0x") ? PRIVATE_KEY : `0x${PRIVATE_KEY}`]
-          : {
-              mnemonic: MNEMONIC,
-              path: "m/44'/60'/0'/0/",
-              count: 10,
-            },
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : {
+        mnemonic: MNEMONIC,
+        path: "m/44'/60'/0'/0/",
+        count: 10,
+      },
       chainId: 11155111,
-      url: `https://sepolia.infura.io/v3/${INFURA_API_KEY}`,
+      url: process.env.INFURA_API_KEY && process.env.INFURA_API_KEY !== "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz" 
+        ? `https://sepolia.infura.io/v3/${process.env.INFURA_API_KEY}`
+        : process.env.SEPOLIA_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com",
+      timeout: 300000,
     },
   },
   paths: {

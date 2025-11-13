@@ -19,7 +19,15 @@ try {
     const chainDirs = readdirSync(deploymentsPath);
     for (const chainDirName of chainDirs) {
       // Map directory name to actual chainId
-      const chainId = chainDirName === 'localhost' ? '31337' : chainDirName;
+      let chainId;
+      if (chainDirName === 'localhost') {
+        chainId = '31337';
+      } else if (chainDirName === 'sepolia') {
+        chainId = '11155111';
+      } else {
+        chainId = chainDirName;
+      }
+      
       const chainDeploymentPath = join(deploymentsPath, chainDirName);
       if (statSync(chainDeploymentPath).isDirectory()) {
         const files = readdirSync(chainDeploymentPath);
